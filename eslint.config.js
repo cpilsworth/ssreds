@@ -26,6 +26,14 @@ export default tseslint.config(
     },
   },
   {
+    // Test files: fetch mocks are commonly `async () => new Response(...)`
+    // to match the Fetch API shape even when they don't internally await.
+    files: ["test/**/*.ts"],
+    rules: {
+      "@typescript-eslint/require-await": "off",
+    },
+  },
+  {
     ignores: ["node_modules/**", "dist/**"],
   },
 );
