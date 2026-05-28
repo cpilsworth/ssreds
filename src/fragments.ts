@@ -154,8 +154,20 @@ function decodeHtmlAttr(s: string): string {
     .replace(/&#39;/g, "'");
 }
 
-function resolveFragmentUrl(href: string, origin: string, baseUrl: string): URL {
+function resolveFragmentUrl(
+  href: string,
+  origin: string,
+  baseUrl: string,
+  allowedHosts: ReadonlySet<string>,
+): { url: URL; external: boolean } {
   const u = new URL(href, baseUrl);
+  if (allowedHosts.has(u.hostname)) {
+    // Whitelisted external URL — fetch as-is, no host rewrite and no
+    // .plain.html suffix (this is an API endpoint, not an EDS document).
+    u.hash = '';
+    return { url: u, external: true };
+  }
+  // Default behaviour: rewrite to the EDS origin and append .plain.html.
   const originUrl = new URL(origin);
   u.protocol = originUrl.protocol;
   u.hostname = originUrl.hostname;
@@ -166,7 +178,7 @@ function resolveFragmentUrl(href: string, origin: string, baseUrl: string): URL 
   }
   u.search = '';
   u.hash = '';
-  return u;
+  return { url: u, external: false };
 }
 
 interface SectionRange {
@@ -215,6 +227,7 @@ export async function inlineFragments(
   html: string,
   origin: string,
   baseUrl: string,
+  allowedHosts: ReadonlySet<string> = new Set(),
   depth = 0,
   visited: ReadonlySet<string> = new Set(),
 ): Promise<string> {
@@ -224,7 +237,7 @@ export async function inlineFragments(
   if (matches.length === 0) return html;
 
   const replacements = await Promise.all(
-    matches.map((mt) => fetchAndInline(mt.href, origin, baseUrl, depth, visited)),
+    matches.map((mt) => fetchAndInline(mt.href, origin, baseUrl, allowedHosts, depth, visited)),
   );
 
   // Find which top-level <main> sections contain at least one fragment that
@@ -292,16 +305,20 @@ async function fetchAndInline(
   href: string,
   origin: string,
   baseUrl: string,
+  allowedHosts: ReadonlySet<string>,
   depth: number,
   visited: ReadonlySet<string>,
 ): Promise<string | null> {
-  let url: URL;
+  let resolved: { url: URL; external: boolean };
   try {
-    url = resolveFragmentUrl(href, origin, baseUrl);
+    resolved = resolveFragmentUrl(href, origin, baseUrl, allowedHosts);
   } catch {
     return null;
   }
-  const key = url.pathname;
+  const { url, external } = resolved;
+  // Cache key includes host so an external URL is never confused with an
+  // origin-scoped path with the same pathname.
+  const key = `${url.host}${url.pathname}${url.search}`;
   if (visited.has(key)) return '';
 
   let res: Response;
@@ -319,6 +336,13 @@ async function fetchAndInline(
   const fragHtml = await res.text();
   const nextVisited = new Set(visited);
   nextVisited.add(key);
-  const inlined = await inlineFragments(fragHtml, origin, url.toString(), depth + 1, nextVisited);
+
+  // External whitelisted hosts: inline the response verbatim under a section
+  // wrapper. We don't recurse into them looking for nested EDS fragment
+  // markup — that's the EDS origin's job, not arbitrary third-party APIs.
+  if (external) {
+    return `<div class="section"><div class="default-content-wrapper">${fragHtml}</div></div>`;
+  }
+  const inlined = await inlineFragments(fragHtml, origin, url.toString(), allowedHosts, depth + 1, nextVisited);
   return decoratePlainHtmlInline(inlined);
 }

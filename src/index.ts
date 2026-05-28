@@ -2,6 +2,14 @@ import { inlineFragments } from './fragments';
 
 export interface Env {
   HOST_MAP: string;
+  /**
+   * Optional JSON array of hostnames whose URLs are allowed to appear in
+   * fragment hrefs without being rewritten to the EDS origin. Used to inline
+   * content from API endpoints (e.g. `["j2api.cpilsworth.workers.dev"]`).
+   * If omitted, all fragment hrefs are forced back to the EDS origin and
+   * `.plain.html` is appended.
+   */
+  ALLOWED_FRAGMENT_HOSTS?: string;
 }
 
 const STRIPPED_REQUEST_HEADERS = new Set([
@@ -80,6 +88,19 @@ function isHtmlResponse(response: Response): boolean {
   return ct.toLowerCase().includes('text/html');
 }
 
+function parseAllowedHosts(raw: string | undefined): ReadonlySet<string> {
+  if (!raw) return new Set();
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (Array.isArray(parsed)) {
+      return new Set(parsed.filter((v): v is string => typeof v === 'string'));
+    }
+  } catch {
+    /* fall through */
+  }
+  return new Set();
+}
+
 // The worker tags each inlined fragment block with `data-ssr="inlined"`.
 // The site's blocks/fragment/fragment.js must check for this and unwrap
 // the block before invoking its normal fetch-and-replace logic, e.g.:
@@ -112,7 +133,8 @@ export default {
     }
 
     const originalHtml = await upstreamResponse.text();
-    const rewrittenHtml = await inlineFragments(originalHtml, origin, request.url);
+    const allowedHosts = parseAllowedHosts(env.ALLOWED_FRAGMENT_HOSTS);
+    const rewrittenHtml = await inlineFragments(originalHtml, origin, request.url, allowedHosts);
 
     const headers = new Headers(upstreamResponse.headers);
     headers.delete('content-length');

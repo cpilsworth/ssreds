@@ -285,3 +285,47 @@ describe('inlineFragments', () => {
     expect(out).toContain('<p>already</p>');
   });
 });
+
+describe('inlineFragments — external host whitelist', () => {
+  it('rewrites a non-whitelisted external href back to the origin', async () => {
+    const html = page(`<div>${fragmentBlock('https://evil.example.com/x')}</div>`);
+    installFetchMock({
+      [`${ORIGIN}/x.plain.html`]: { body: '<div><p>from origin</p></div>' },
+    });
+    const out = await inlineFragments(html, ORIGIN, BASE_URL);
+    expect(out).toContain('<p>from origin</p>');
+  });
+
+  it('fetches a whitelisted external href as-is (no .plain.html, no host rewrite)', async () => {
+    const html = page(`<div>${fragmentBlock('https://api.example.com/items?id=1')}</div>`);
+    const seen: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        seen.push(url);
+        return new Response('<div><p>external html</p></div>', {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        });
+      }),
+    );
+    const out = await inlineFragments(html, ORIGIN, BASE_URL, new Set(['api.example.com']));
+    expect(seen).toEqual(['https://api.example.com/items?id=1']);
+    expect(out).toContain('<p>external html</p>');
+  });
+
+  it('wraps an external whitelisted HTML response in a section/default-content-wrapper', async () => {
+    const html = page(`<div>${fragmentBlock('https://api.example.com/widget')}</div>`);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        new Response('<ul class="things"><li>one</li></ul>', {
+          status: 200,
+          headers: { 'content-type': 'text/html' },
+        })),
+    );
+    const out = await inlineFragments(html, ORIGIN, BASE_URL, new Set(['api.example.com']));
+    expect(out).toContain('<div class="section"><div class="default-content-wrapper"><ul class="things"><li>one</li></ul></div></div>');
+  });
+});

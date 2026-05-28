@@ -11,6 +11,10 @@ workers_dev = true
 #   -> worker proxies https://<ref--repo--org>.aem.page
 [vars]
 HOST_MAP = '{"--live.diffatech.co.uk":"aem.live","--page.diffatech.co.uk":"aem.page",".aem.live":"aem.live",".aem.page":"aem.page"}'
+# Hostnames allowed in fragment hrefs *without* being rewritten to the EDS
+# origin. JSON responses from these hosts are rendered as nested HTML so
+# crawlers can read API payloads server-side.
+ALLOWED_FRAGMENT_HOSTS = '["j2api.cpilsworth.workers.dev"]'
 
 [[routes]]
 pattern = "*--live.diffatech.co.uk/*"

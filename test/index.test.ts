@@ -216,6 +216,63 @@ describe('worker.fetch — proxying behaviour', () => {
     expect(res.headers.get('cache-control')).toBe('max-age=60');
   });
 
+  it('passes ALLOWED_FRAGMENT_HOSTS through to the inliner so external URLs are fetched as-is', async () => {
+    const envWithHosts: Env = {
+      HOST_MAP: HOST_MAP_JSON,
+      ALLOWED_FRAGMENT_HOSTS: '["api.example.com"]',
+    };
+    const seen: string[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL) => {
+        const url = typeof input === 'string' ? input : input instanceof URL ? input.toString() : input.url;
+        seen.push(url);
+        if (url === 'https://main--r--o.aem.page/') {
+          return new Response(
+            '<!DOCTYPE html><html><head></head><body><main><div>' +
+              '<div class="fragment"><div><div><a href="https://api.example.com/data">x</a></div></div></div>' +
+              '</div></main></body></html>',
+            { status: 200, headers: { 'content-type': 'text/html' } },
+          );
+        }
+        if (url === 'https://api.example.com/data') {
+          return new Response('<p>from external host</p>', {
+            status: 200,
+            headers: { 'content-type': 'text/html' },
+          });
+        }
+        return new Response('miss', { status: 599 });
+      }),
+    );
+    const res = await worker.fetch(
+      new Request('https://main--r--o--page.diffatech.co.uk/'),
+      envWithHosts,
+    );
+    expect(seen).toContain('https://api.example.com/data');
+    const body = await res.text();
+    expect(body).toContain('<p>from external host</p>');
+  });
+
+  it('treats malformed ALLOWED_FRAGMENT_HOSTS as an empty set (no crash)', async () => {
+    const envBad: Env = { HOST_MAP: HOST_MAP_JSON, ALLOWED_FRAGMENT_HOSTS: 'not json' };
+    mockUpstream(async () => new Response('<html></html>', { status: 200, headers: { 'content-type': 'text/html' } }));
+    const res = await worker.fetch(
+      new Request('https://main--r--o--page.diffatech.co.uk/'),
+      envBad,
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it('treats a non-array ALLOWED_FRAGMENT_HOSTS as an empty set', async () => {
+    const envObj: Env = { HOST_MAP: HOST_MAP_JSON, ALLOWED_FRAGMENT_HOSTS: '{"not":"an array"}' };
+    mockUpstream(async () => new Response('<html></html>', { status: 200, headers: { 'content-type': 'text/html' } }));
+    const res = await worker.fetch(
+      new Request('https://main--r--o--page.diffatech.co.uk/'),
+      envObj,
+    );
+    expect(res.status).toBe(200);
+  });
+
   it('forwards a body on non-GET/HEAD requests', async () => {
     let received: Request | undefined;
     mockUpstream(async (req) => {
