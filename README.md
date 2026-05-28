@@ -5,7 +5,7 @@ sites and inlines `div.fragment` block content server-side. The HTML returned
 to the client already contains every fragment's resolved markup — so crawlers,
 LLMs, and JS-disabled clients see the full page on first byte, without
 executing `fragment.js`. In JS-enabled browsers the post-decoration DOM is
-identical to origin (no extra wrappers, no double fetches).
+identical to origin (no extra wrappers, no double fetches). 
 
 ## How it works
 
