@@ -1,4 +1,4 @@
-# ssreds — SSR fragment inliner for Adobe Edge Delivery Services
+# SSREDS - SSR fragment inliner for Adobe Edge Delivery Services
 
 A Cloudflare Worker that fronts one or more Adobe Edge Delivery Services (EDS)
 sites and inlines `div.fragment` block content server-side. The HTML returned
