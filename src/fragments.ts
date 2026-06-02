@@ -217,6 +217,7 @@ export async function inlineFragments(
   baseUrl: string,
   depth = 0,
   visited: ReadonlySet<string> = new Set(),
+  fetchInit: RequestInit = {},
 ): Promise<string> {
   if (depth >= MAX_DEPTH) return html;
 
@@ -224,7 +225,7 @@ export async function inlineFragments(
   if (matches.length === 0) return html;
 
   const replacements = await Promise.all(
-    matches.map((mt) => fetchAndInline(mt.href, origin, baseUrl, depth, visited)),
+    matches.map((mt) => fetchAndInline(mt.href, origin, baseUrl, depth, visited, fetchInit)),
   );
 
   // Find which top-level <main> sections contain at least one fragment that
@@ -294,6 +295,7 @@ async function fetchAndInline(
   baseUrl: string,
   depth: number,
   visited: ReadonlySet<string>,
+  fetchInit: RequestInit,
 ): Promise<string | null> {
   let url: URL;
   try {
@@ -306,9 +308,11 @@ async function fetchAndInline(
 
   let res: Response;
   try {
+    // `fetchInit` carries the Fastly backend + cacheOverride from index.ts.
+    // Kept platform-agnostic here so this module stays node-runnable in tests.
     res = await fetch(url.toString(), {
+      ...fetchInit,
       headers: { accept: 'text/html' },
-      cf: { cacheTtl: 300, cacheEverything: true },
     });
   } catch (err) {
     console.error('fragment fetch failed', url.toString(), err);
@@ -319,6 +323,6 @@ async function fetchAndInline(
   const fragHtml = await res.text();
   const nextVisited = new Set(visited);
   nextVisited.add(key);
-  const inlined = await inlineFragments(fragHtml, origin, url.toString(), depth + 1, nextVisited);
+  const inlined = await inlineFragments(fragHtml, origin, url.toString(), depth + 1, nextVisited, fetchInit);
   return decoratePlainHtmlInline(inlined);
 }

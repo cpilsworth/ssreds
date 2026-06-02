@@ -1,7 +1,10 @@
 node_modules/
-.wrangler/
-dist/
+# Fastly Compute / js-compute build artifacts
+bin/
+build/
+pkg/
+# aio
+.aio
 .env
-.dev.vars
 *.log
 .DS_Store

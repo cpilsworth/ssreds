@@ -2,11 +2,13 @@
   "name": "ssreds",
   "version": "0.1.0",
   "private": true,
-  "description": "Cloudflare Worker that sits in front of an Adobe Edge Delivery Services site and inlines fragment-block content server-side.",
+  "description": "AEM Edge Function (Fastly Compute) that fronts an Adobe Edge Delivery Services site and inlines fragment-block content server-side.",
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "dev": "aio aem edge-functions serve",
+    "prebuild": "tsc -p tsconfig.build.json",
+    "build": "js-compute-runtime ./build/index.js ./bin/main.wasm",
+    "deploy": "aio aem edge-functions deploy ssreds",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -14,14 +16,15 @@
     "lint": "eslint 'src/**/*.ts' 'test/**/*.ts'",
     "lint:fix": "eslint 'src/**/*.ts' 'test/**/*.ts' --fix"
   },
+  "dependencies": {
+    "@fastly/js-compute": "^3.41.1"
+  },
   "devDependencies": {
-    "@cloudflare/workers-types": "^4.20250901.0",
     "@eslint/js": "^10.0.1",
     "@vitest/coverage-v8": "^4.1.7",
     "eslint": "^10.4.0",
     "typescript": "^5.6.0",
     "typescript-eslint": "^8.59.4",
-    "vitest": "^4.1.7",
-    "wrangler": "^4.0.0"
+    "vitest": "^4.1.7"
   }
 }
