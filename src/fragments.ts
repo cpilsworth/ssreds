@@ -218,6 +218,7 @@ export async function inlineFragments(
   depth = 0,
   visited: ReadonlySet<string> = new Set(),
   fetchInit: RequestInit = {},
+  onFetch?: () => void,
 ): Promise<string> {
   if (depth >= MAX_DEPTH) return html;
 
@@ -225,7 +226,7 @@ export async function inlineFragments(
   if (matches.length === 0) return html;
 
   const replacements = await Promise.all(
-    matches.map((mt) => fetchAndInline(mt.href, origin, baseUrl, depth, visited, fetchInit)),
+    matches.map((mt) => fetchAndInline(mt.href, origin, baseUrl, depth, visited, fetchInit, onFetch)),
   );
 
   // Find which top-level <main> sections contain at least one fragment that
@@ -296,6 +297,7 @@ async function fetchAndInline(
   depth: number,
   visited: ReadonlySet<string>,
   fetchInit: RequestInit,
+  onFetch?: () => void,
 ): Promise<string | null> {
   let url: URL;
   try {
@@ -310,6 +312,9 @@ async function fetchAndInline(
   try {
     // `fetchInit` carries the Fastly backend + cacheOverride from index.ts.
     // Kept platform-agnostic here so this module stays node-runnable in tests.
+    // `onFetch` lets the caller count actual backend requests (vs cache hits)
+    // for perf instrumentation / the 32-backend-request budget.
+    onFetch?.();
     res = await fetch(url.toString(), {
       ...fetchInit,
       headers: { accept: 'text/html' },
@@ -323,6 +328,6 @@ async function fetchAndInline(
   const fragHtml = await res.text();
   const nextVisited = new Set(visited);
   nextVisited.add(key);
-  const inlined = await inlineFragments(fragHtml, origin, url.toString(), depth + 1, nextVisited, fetchInit);
+  const inlined = await inlineFragments(fragHtml, origin, url.toString(), depth + 1, nextVisited, fetchInit, onFetch);
   return decoratePlainHtmlInline(inlined);
 }

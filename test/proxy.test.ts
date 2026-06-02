@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildUpstreamRequest, isHtmlResponse } from '../src/proxy';
+import { buildUpstreamRequest, formatServerTiming, isHtmlResponse } from '../src/proxy';
 
 const ORIGIN = 'https://main--repo--owner.aem.live';
 
@@ -74,5 +74,24 @@ describe('isHtmlResponse', () => {
   it('is false when no content-type is present', () => {
     const res = new Response('');
     expect(isHtmlResponse(res)).toBe(false);
+  });
+});
+
+describe('formatServerTiming', () => {
+  it('formats metrics with fixed-precision durations', () => {
+    const out = formatServerTiming({
+      total: { dur: 12.3456 },
+      upstream: { dur: 8 },
+    });
+    expect(out).toBe('total;dur=12.346, upstream;dur=8.000');
+  });
+
+  it('includes a quoted desc when provided', () => {
+    const out = formatServerTiming({ fragments: { dur: 3, desc: '4 fetches' } });
+    expect(out).toBe('fragments;dur=3.000;desc="4 fetches"');
+  });
+
+  it('returns an empty string for no metrics', () => {
+    expect(formatServerTiming({})).toBe('');
   });
 });

@@ -69,6 +69,19 @@ Fastly that's `new CacheOverride('override', { ttl })` from
 `fastly:cache-override`, passed as the `cacheOverride` fetch option. It is built
 once in `index.ts` and reused for the page and all fragment fetches.
 
+### Perf instrumentation is opt-in via `x-perf-trace`
+
+`vCpuTime()` from `fastly:compute` (wrapped as `vCpuTimeMs()` in `fastly.ts`)
+gives per-request Fastly vCPU "work time" in-code — the only way to read vCPU
+without the Observability API (which Adobe Managed CDN may not expose to you).
+When a request carries `x-perf-trace`, `index.ts` attaches `Server-Timing`
+(total/upstream/fragments/vcpu) and `x-compute-vcpu-ms` / `x-compute-backend-reqs`
+headers; otherwise nothing is added (zero impact on normal traffic). The harness
+in `perf/` sends that header and aggregates the results. Backend-request count
+comes from the `onFetch` callback threaded through `inlineFragments`. Local
+Viceroy may not implement `vCpuTime()` — `vCpuTimeMs()` returns `undefined` and
+the header is omitted; don't treat that as a bug.
+
 ### Fastly 32-backend-requests-per-execution limit
 
 A single function execution may make at most **32 backend requests**. The page

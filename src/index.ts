@@ -1,8 +1,14 @@
 /// <reference types="@fastly/js-compute" />
 
 import { inlineFragments } from './fragments';
-import { buildUpstreamRequest, isHtmlResponse } from './proxy';
-import { BACKEND, buildCacheOverride, getOrigin } from './fastly';
+import {
+  buildUpstreamRequest,
+  formatServerTiming,
+  isHtmlResponse,
+  PERF_TRACE_HEADER,
+  type TimingMetric,
+} from './proxy';
+import { BACKEND, buildCacheOverride, getOrigin, vCpuTimeMs } from './fastly';
 
 // AEM Edge Function entry point. Runs as a Fastly Compute service at Adobe's
 // Managed CDN layer; `cdn.yaml` originSelectors route HTML document paths here.
@@ -26,6 +32,11 @@ import { BACKEND, buildCacheOverride, getOrigin } from './fastly';
 addEventListener('fetch', (event) => event.respondWith(handleRequest(event)));
 
 async function handleRequest(event: FetchEvent): Promise<Response> {
+  const start = performance.now();
+  // Opt-in perf tracing: only attach Server-Timing / x-compute-* headers when
+  // the caller (e.g. the load harness) sends the trace header.
+  const trace = event.request.headers.has(PERF_TRACE_HEADER);
+
   let origin: string;
   try {
     origin = getOrigin();
@@ -43,27 +54,52 @@ async function handleRequest(event: FetchEvent): Promise<Response> {
 
   try {
     const upstreamRequest = buildUpstreamRequest(event.request, origin);
+    const upstreamStart = performance.now();
     const upstreamResponse = await fetch(upstreamRequest, fetchInit);
+    const upstreamMs = performance.now() - upstreamStart;
 
-    if (!isHtmlResponse(upstreamResponse)) {
-      return upstreamResponse;
+    let backendReqs = 1; // the page fetch above
+    let fragmentMs = 0;
+    let body: BodyInit | null;
+    const headers = new Headers(upstreamResponse.headers);
+
+    if (isHtmlResponse(upstreamResponse)) {
+      const originalHtml = await upstreamResponse.text();
+      const fragmentStart = performance.now();
+      body = await inlineFragments(
+        originalHtml,
+        origin,
+        event.request.url,
+        0,
+        new Set(),
+        fetchInit,
+        () => {
+          backendReqs++;
+        },
+      );
+      fragmentMs = performance.now() - fragmentStart;
+      headers.delete('content-length');
+      headers.delete('content-encoding');
+    } else {
+      body = upstreamResponse.body;
     }
 
-    const originalHtml = await upstreamResponse.text();
-    const rewrittenHtml = await inlineFragments(
-      originalHtml,
-      origin,
-      event.request.url,
-      0,
-      new Set(),
-      fetchInit,
-    );
+    if (trace) {
+      const metrics: Record<string, TimingMetric> = {
+        total: { dur: performance.now() - start },
+        upstream: { dur: upstreamMs },
+        fragments: { dur: fragmentMs, desc: `${backendReqs - 1} fetches` },
+      };
+      const vcpu = vCpuTimeMs();
+      if (vcpu !== undefined) {
+        metrics.vcpu = { dur: vcpu };
+        headers.set('x-compute-vcpu-ms', vcpu.toFixed(3));
+      }
+      headers.set('Server-Timing', formatServerTiming(metrics));
+      headers.set('x-compute-backend-reqs', String(backendReqs));
+    }
 
-    const headers = new Headers(upstreamResponse.headers);
-    headers.delete('content-length');
-    headers.delete('content-encoding');
-
-    return new Response(rewrittenHtml, {
+    return new Response(body, {
       status: upstreamResponse.status,
       statusText: upstreamResponse.statusText,
       headers,

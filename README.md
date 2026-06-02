@@ -144,6 +144,23 @@ from coverage. Two suites:
 - [`test/fragments.test.ts`](test/fragments.test.ts) — fragment inliner: empty pages, single/multiple fragments, 404s, network errors, recursive nesting, cycle detection, depth limit, malformed hrefs, multi-section `.plain.html`, entity-decoded hrefs, trailing-slash + pre-suffixed paths.
 - [`test/proxy.test.ts`](test/proxy.test.ts) — request/response helpers: upstream URL rebuilding, host rewriting, header stripping, POST body forwarding (with `duplex: 'half'`), and HTML content-type detection.
 
+## Performance
+
+A load/perf harness lives in [`perf/`](perf/). It measures client-observed
+proxy latency (p50/p90/p99, req/s) **and** Fastly server-side metrics — vCPU ms
+(`vCpuTime()` from `fastly:compute`), upstream fetch time, fragment-phase time,
+and backend-request count — which the function emits as `Server-Timing` /
+`x-compute-*` headers when a request carries the `x-perf-trace` header.
+
+```bash
+npm run dev                                   # start local server first
+npm run perf                                  # hit http://127.0.0.1:7676
+npm run perf -- --base https://your-site -n 500 -c 25   # or a deployed site
+```
+
+See [`perf/README.md`](perf/README.md) for options, scenarios, and how to read
+vCPU vs wall time (and why local Viceroy numbers aren't production-representative).
+
 ## Lint and typecheck
 
 ```bash
@@ -209,6 +226,10 @@ ssreds/
 ├── test/
 │   ├── fragments.test.ts
 │   └── proxy.test.ts
+├── perf/
+│   ├── loadtest.mjs      # load harness: latency percentiles + Fastly vCPU
+│   ├── scenarios.json    # default perf scenarios
+│   └── README.md
 ├── config/
 │   ├── edgeFunctions.yaml  # AEM Edge Functions service declaration
 │   └── cdn.yaml            # Managed CDN origin-selector routing

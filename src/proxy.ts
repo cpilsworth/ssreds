@@ -60,3 +60,28 @@ export function isHtmlResponse(response: Response): boolean {
   const ct = response.headers.get('content-type') ?? '';
   return ct.toLowerCase().includes('text/html');
 }
+
+// Opt-in request header that turns on perf instrumentation (Server-Timing +
+// x-compute-* response headers). Off by default so normal traffic is unaffected.
+export const PERF_TRACE_HEADER = 'x-perf-trace';
+
+export interface TimingMetric {
+  /** duration in milliseconds */
+  dur: number;
+  /** optional human description (Server-Timing `desc`) */
+  desc?: string;
+}
+
+/**
+ * Render a `Server-Timing` header value from named metrics, e.g.
+ *   { total: { dur: 12.3 }, fragments: { dur: 3, desc: '4 fetches' } }
+ *   => "total;dur=12.300, fragments;dur=3.000;desc=\"4 fetches\""
+ */
+export function formatServerTiming(metrics: Record<string, TimingMetric>): string {
+  return Object.entries(metrics)
+    .map(([name, m]) => {
+      const base = `${name};dur=${m.dur.toFixed(3)}`;
+      return m.desc ? `${base};desc="${m.desc}"` : base;
+    })
+    .join(', ');
+}

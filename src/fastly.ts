@@ -5,6 +5,7 @@
 
 import { ConfigStore } from 'fastly:config-store';
 import { CacheOverride } from 'fastly:cache-override';
+import { vCpuTime } from 'fastly:compute';
 
 /**
  * Named backend for the upstream EDS origin. Declared in `fastly.toml`
@@ -31,4 +32,18 @@ export function getOrigin(): string {
 
 export function buildCacheOverride(ttl: number): CacheOverride {
   return new CacheOverride('override', { ttl });
+}
+
+/**
+ * Elapsed vCPU time (ms) for the current request handler — Fastly's internal
+ * "work time" billing metric, distinct from wall-clock time. Returns undefined
+ * if the runtime doesn't support it (e.g. older Viceroy local builds), so
+ * callers can omit it from instrumentation cleanly.
+ */
+export function vCpuTimeMs(): number | undefined {
+  try {
+    return vCpuTime();
+  } catch {
+    return undefined;
+  }
 }
