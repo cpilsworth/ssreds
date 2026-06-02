@@ -20,11 +20,11 @@ service_id = ""
     [local_server.backends.eds_origin]
       # The single upstream EDS origin this function fronts. Point this at the
       # site you are developing against, e.g. main--<repo>--<owner>.aem.live.
-      url = "https://main--repo--owner.aem.live"
+      url = "https://main--j2retail--cpilsworth.aem.page"
 
   [local_server.config_stores]
     [local_server.config_stores.config_default]
       format = "inline-toml"
     [local_server.config_stores.config_default.contents]
       # Bare EDS hostname (or full origin URL). getOrigin() reads this.
-      EDS_ORIGIN = "main--repo--owner.aem.live"
+      EDS_ORIGIN = "main--j2retail--cpilsworth.aem.page"
