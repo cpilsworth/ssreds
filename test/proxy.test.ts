@@ -32,6 +32,16 @@ describe('buildUpstreamRequest', () => {
     expect(upstream.headers.get('connection')).toBeNull();
   });
 
+  it('strips accept-encoding so the origin returns an uncompressed body', () => {
+    // Fastly fetch() does not auto-decompress; a gzip/br body would make
+    // response.text() throw. The origin must respond with identity encoding.
+    const req = new Request('https://edge.example.com/', {
+      headers: { 'accept-encoding': 'gzip, deflate, br' },
+    });
+    const upstream = buildUpstreamRequest(req, ORIGIN);
+    expect(upstream.headers.get('accept-encoding')).toBeNull();
+  });
+
   it('preserves the method and forwards a body on non-GET/HEAD requests', async () => {
     const req = new Request('https://edge.example.com/api', {
       method: 'POST',

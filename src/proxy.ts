@@ -14,6 +14,11 @@ const STRIPPED_REQUEST_HEADERS = new Set([
   'trailer',
   'transfer-encoding',
   'upgrade',
+  // We rewrite the HTML body, so the origin must return it uncompressed.
+  // Fastly's fetch() does NOT auto-decompress, so a gzip/br body would make
+  // response.text() throw "malformed UTF-8". Strip accept-encoding to force an
+  // identity response; the outer Managed CDN re-compresses for the client.
+  'accept-encoding',
 ]);
 
 /**

@@ -52,6 +52,16 @@ Also, `@fastly/js-compute`'s `RequestInit` type has **no `redirect` option**
 (the runtime never follows redirects — it returns the redirect response
 verbatim). `tsc` will error on `redirect: 'manual'`; don't add it back.
 
+### Fastly `fetch` does not auto-decompress — strip `accept-encoding`
+
+Cloudflare/undici transparently decompress upstream responses; Fastly's
+`fetch()` does **not**. If the origin returns a gzip/br body, `response.text()`
+throws `TypeError: malformed UTF-8 character sequence` and the handler 500s.
+Browsers send `Accept-Encoding: gzip, deflate, br`, so this only shows up with a
+real client (not bare `curl`). `buildUpstreamRequest` strips `accept-encoding`
+from the upstream request so the origin replies identity-encoded and we can
+parse/rewrite the HTML; the outer Managed CDN re-compresses for the client.
+
 ### Cache control is `CacheOverride`, not Cloudflare's `cf:`
 
 The old Worker used `fetch(url, { cf: { cacheTtl, cacheEverything } })`. On
