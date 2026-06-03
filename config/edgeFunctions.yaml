@@ -5,6 +5,6 @@ data:
     - name: ssreds
   # Provisions the production config_default ConfigStore value that getOrigin()
   # reads. Locally this comes from fastly.toml [local_server.config_stores].
-  config:
+  configs:
     - key: EDS_ORIGIN
       value: main--j2retail--cpilsworth.aem.live
