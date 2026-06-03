@@ -3,8 +3,8 @@ version: "1"
 data:
   services:
     - name: ssreds
-  # Uncomment to provision a config value at deploy time. Locally this comes
-  # from fastly.toml [local_server.config_stores.config_default].
-  # config:
-  #   - key: EDS_ORIGIN
-  #     value: ${{ EDS_ORIGIN }}
+  # Provisions the production config_default ConfigStore value that getOrigin()
+  # reads. Locally this comes from fastly.toml [local_server.config_stores].
+  config:
+    - key: EDS_ORIGIN
+      value: main--j2retail--cpilsworth.aem.live
