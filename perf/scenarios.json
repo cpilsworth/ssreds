@@ -1,0 +1,8 @@
+{
+  "$comment": "Default perf scenarios. Each runs independently. `path` is appended to --base. Tune paths to your site: pick a fragment-heavy page, a plain page, and a non-HTML asset to contrast inlining cost vs pure proxy cost.",
+  "scenarios": [
+    { "name": "home (fragments inlined)", "path": "/" },
+    { "name": "plain.html (raw fragment)", "path": "/index.plain.html" },
+    { "name": "asset passthrough (css)", "path": "/styles/styles.css" }
+  ]
+}

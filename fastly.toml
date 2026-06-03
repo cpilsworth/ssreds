@@ -1,0 +1,30 @@
+# Fastly Compute package manifest for the ssreds AEM Edge Function.
+# https://www.fastly.com/documentation/reference/compute/fastly-toml
+
+authors = []
+cloned_from = "https://github.com/adobe/aem-edge-functions-boilerplate"
+description = "AEM Edge Function that inlines EDS div.fragment content server-side"
+language = "javascript"
+manifest_version = 3
+name = "ssreds"
+service_id = ""
+
+[scripts]
+  build = "npm run build"
+  post_init = "npm install"
+
+# Local-dev only. In production the EDS origin backend and config_default store
+# are provisioned by the AEM Edge Functions service (config/edgeFunctions.yaml).
+[local_server]
+  [local_server.backends]
+    [local_server.backends.eds_origin]
+      # The single upstream EDS origin this function fronts. Point this at the
+      # site you are developing against, e.g. main--<repo>--<owner>.aem.live.
+      url = "https://main--j2retail--cpilsworth.aem.page"
+
+  [local_server.config_stores]
+    [local_server.config_stores.config_default]
+      format = "inline-toml"
+    [local_server.config_stores.config_default.contents]
+      # Bare EDS hostname (or full origin URL). getOrigin() reads this.
+      EDS_ORIGIN = "main--j2retail--cpilsworth.aem.page"

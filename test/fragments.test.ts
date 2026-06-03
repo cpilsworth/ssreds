@@ -61,6 +61,17 @@ describe('inlineFragments', () => {
     expect(out).not.toMatch(/<a href="\/fragments\/x"/);
   });
 
+  it('invokes the onFetch callback once per backend fragment fetch', async () => {
+    const html = page(`<div>${fragmentBlock('/a')}${fragmentBlock('/b')}</div>`);
+    installFetchMock({
+      [`${ORIGIN}/a.plain.html`]: { body: '<div><p>A</p></div>' },
+      [`${ORIGIN}/b.plain.html`]: { body: '<div><p>B</p></div>' },
+    });
+    let fetches = 0;
+    await inlineFragments(html, ORIGIN, BASE_URL, 0, new Set(), {}, () => { fetches++; });
+    expect(fetches).toBe(2);
+  });
+
   it('inlines multiple fragments in the same section and annotates the section once', async () => {
     const html = page(`<div>${fragmentBlock('/a')}${fragmentBlock('/b')}</div>`);
     installFetchMock({

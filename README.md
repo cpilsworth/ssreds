@@ -1,80 +1,71 @@
 # SSREDS - SSR fragment inliner for Adobe Edge Delivery Services
 
-A Cloudflare Worker that fronts one or more Adobe Edge Delivery Services (EDS)
-sites and inlines `div.fragment` block content server-side. The HTML returned
-to the client already contains every fragment's resolved markup — so crawlers,
-LLMs, and JS-disabled clients see the full page on first byte, without
-executing `fragment.js`. In JS-enabled browsers the post-decoration DOM is
-identical to origin (no extra wrappers, no double fetches). 
+An **AEM Edge Function** that fronts an Adobe Edge Delivery Services (EDS) site
+and inlines `div.fragment` block content server-side. The HTML returned to the
+client already contains every fragment's resolved markup — so crawlers, LLMs,
+and JS-disabled clients see the full page on first byte, without executing
+`fragment.js`. In JS-enabled browsers the post-decoration DOM is identical to
+origin (no extra wrappers, no double fetches).
+
+AEM Edge Functions run JavaScript at Adobe's Managed CDN layer, which is
+**Fastly Compute** under the hood. This project is written in TypeScript,
+compiled to JS and then to WASM via [`@fastly/js-compute`](https://www.npmjs.com/package/@fastly/js-compute),
+and deployed with the **Adobe I/O (`aio`) CLI**.
 
 ## How it works
 
-1. A request arrives. The worker resolves the upstream EDS origin from
-   `HOST_MAP` (see [Configuration](#configuration)).
-2. It proxies the request transparently, stripping hop-by-hop and `cf-*` /
-   `x-forwarded-*` headers and rewriting `Host` to the upstream.
+1. A request for an HTML document arrives. Adobe's Managed CDN routes it to this
+   edge function (see [`config/cdn.yaml`](config/cdn.yaml) origin selectors).
+2. The function proxies the request to the EDS origin through the `eds_origin`
+   backend, stripping hop-by-hop and `x-forwarded-*` headers and rewriting
+   `Host` to the upstream. The origin is read from the `EDS_ORIGIN` ConfigStore
+   value (see [Configuration](#configuration)).
 3. For `text/html` responses, it parses the body for `<div class="fragment">`
    blocks. For each one it fetches `<href>.plain.html` from the same origin
-   (in parallel, with a 5-minute edge cache) and:
+   (in parallel, with a 5-minute cache override) and:
    - tags the block with `data-ssr="inlined"` so client-side `fragment.js` can
      short-circuit (see [Required fragment.js change](#required-fragmentjs-change))
    - decorates the inlined content with `<div class="section"><div class="default-content-wrapper">…</div></div>` to mirror what `decorateSections` would produce in the browser
    - adds `fragment-container` to the surrounding section
-4. Nested fragments are resolved recursively (depth-capped at 5; visited-set
+4. Nested fragments are resolved recursively (depth-capped at 5; a visited-set
    breaks cycles).
 5. Everything else (CSS, JS, images, JSON, redirects, error responses) streams
    through unchanged.
 
+> **Fastly limit:** a single execution may make at most **32 backend requests**.
+> The page fetch plus recursive fragment fan-out (`MAX_DEPTH` = 5) all share
+> that budget — keep fragment graphs shallow on heavily-fragmented pages.
+
 ## Configuration
 
-The worker is multi-tenant — a single deployment can front any number of EDS
-sites via the host name. Configuration lives in [`wrangler.toml`](wrangler.toml):
+This function fronts a **single** EDS origin. Two pieces of configuration drive
+it:
+
+- **`EDS_ORIGIN`** — the EDS hostname (or full origin URL) to proxy, read from
+  the `config_default` ConfigStore at runtime by `getOrigin()` in
+  [`src/fastly.ts`](src/fastly.ts). e.g. `main--repo--owner.aem.live`.
+- **`eds_origin` backend** — the named Fastly backend every upstream and
+  fragment fetch routes through.
+
+For **local development** both live in [`fastly.toml`](fastly.toml) under
+`[local_server]`:
 
 ```toml
-[vars]
-HOST_MAP = '{"--live.diffatech.co.uk":"aem.live","--page.diffatech.co.uk":"aem.page",".aem.live":"aem.live",".aem.page":"aem.page"}'
+[local_server.backends.eds_origin]
+  url = "https://main--repo--owner.aem.live"
 
-[[routes]]
-pattern = "*--live.diffatech.co.uk/*"
-zone_name = "diffatech.co.uk"
-
-[[routes]]
-pattern = "*--page.diffatech.co.uk/*"
-zone_name = "diffatech.co.uk"
+[local_server.config_stores.config_default.contents]
+  EDS_ORIGIN = "main--repo--owner.aem.live"
 ```
 
-`HOST_MAP` is a JSON object mapping **hostname suffix → EDS host suffix**.
-At request time the worker:
-
-1. Reads the request's hostname.
-2. Falls back to each value in the `X-Forwarded-Host` header (left-to-right)
-   if no match — useful when this worker is itself fronted by another CDN.
-3. For the first matching suffix, strips it from the host and rebuilds the
-   origin: `https://<remaining-label>.<eds-host-suffix>`.
-
-### Examples (with the default `HOST_MAP`)
-
-| Request hostname | Resolved origin |
-|---|---|
-| `main--repo--owner--live.diffatech.co.uk` | `https://main--repo--owner.aem.live` |
-| `main--repo--owner--page.diffatech.co.uk` | `https://main--repo--owner.aem.page` |
-| `main--repo--owner.aem.live` (via `X-Forwarded-Host`) | `https://main--repo--owner.aem.live` |
-| anything else | — (returns `502 No origin configured for this host`) |
-
-To use your own zone, swap `diffatech.co.uk` in both `HOST_MAP` and the
-`[[routes]]` patterns. You'll also need a wildcard DNS record in that zone:
-
-| Type | Name | Content | Proxy |
-|---|---|---|---|
-| `AAAA` | `*` | `100::` | Proxied |
-
-Universal SSL covers the single-level wildcard for free. The two routes are
-intentionally narrow (`*--live.<zone>` and `*--page.<zone>`) so unrelated
-subdomains on the same zone are unaffected.
+In **production** the backend and config value are provisioned by the AEM Edge
+Functions service ([`config/edgeFunctions.yaml`](config/edgeFunctions.yaml)) and
+the Adobe Managed CDN. [`config/cdn.yaml`](config/cdn.yaml) decides which request
+paths are routed to the function (by default, HTML document paths).
 
 ## Required fragment.js change
 
-This worker tags inlined fragment blocks with `data-ssr="inlined"`. Your
+This function tags inlined fragment blocks with `data-ssr="inlined"`. Your
 site's `blocks/fragment/fragment.js` should short-circuit on that marker:
 
 ```js
@@ -96,31 +87,44 @@ What this gives you:
   identical in structure to what the unproxied origin produces after JS runs.
 - No fetch, no flash of unstyled content, no extra wrapper layer.
 
-The worker still works without this change — the content is visible to
+The function still works without this change — the content is visible to
 crawlers either way — but the in-browser DOM will have an extra
 `<div class="fragment block">` layer until you ship it.
 
 ## Local development
 
+Requires the [`aio` CLI](https://github.com/adobe/aio-cli) with the AEM Edge
+Functions plugin installed:
+
+```bash
+npm install -g @adobe/aio-cli
+aio plugins:install @adobe/aio-cli-plugin-aem-edge-functions
+```
+
+Then, in this repo:
+
 ```bash
 npm install
-npm run dev          # wrangler dev, defaults to whatever HOST_MAP is in wrangler.toml
+npm run dev          # aio aem edge-functions serve
 ```
 
-The dev server runs at `http://127.0.0.1:8787/`. Hit it with an
-`X-Forwarded-Host` header to test against an arbitrary EDS site:
+The local runtime serves at `http://127.0.0.1:7676/`. Point the `eds_origin`
+backend and `EDS_ORIGIN` value in [`fastly.toml`](fastly.toml) at the site you
+are developing against, then:
 
 ```bash
-curl -i \
-  -H "X-Forwarded-Host: main--j2retail--cpilsworth.aem.page" \
-  http://127.0.0.1:8787/
+curl -i http://127.0.0.1:7676/
 ```
 
-Or override `HOST_MAP` per-run:
+## Build
 
 ```bash
-npx wrangler dev --var ORIGIN:... --var HOST_MAP:...
+npm run build        # tsc -> build/*.js, then js-compute-runtime -> bin/main.wasm
 ```
+
+`prebuild` transpiles the TypeScript in `src/` to `build/` with `tsc`, then
+`build` compiles `build/index.js` to `bin/main.wasm` with `js-compute-runtime`.
+Both `build/` and `bin/` are git-ignored.
 
 ## Tests
 
@@ -131,10 +135,31 @@ npm run test:coverage   # full coverage report
 ```
 
 Coverage thresholds (enforced): 90% lines / 80% branches / 90% functions /
-90% statements. Two suites:
+90% statements, measured over the platform-agnostic modules
+([`src/fragments.ts`](src/fragments.ts) and [`src/proxy.ts`](src/proxy.ts)).
+`src/index.ts` and `src/fastly.ts` import `fastly:*` modules and use the Fastly
+Compute global runtime, so they can't run under node/vitest and are excluded
+from coverage. Two suites:
 
 - [`test/fragments.test.ts`](test/fragments.test.ts) — fragment inliner: empty pages, single/multiple fragments, 404s, network errors, recursive nesting, cycle detection, depth limit, malformed hrefs, multi-section `.plain.html`, entity-decoded hrefs, trailing-slash + pre-suffixed paths.
-- [`test/index.test.ts`](test/index.test.ts) — worker fetch handler: origin resolution (HOST_MAP suffixes, raw EDS hostnames, `X-Forwarded-Host` chain, ports stripped), 502s, header stripping/rewriting, non-HTML pass-through, content-length/-encoding stripping, POST body forwarding (with `duplex: 'half'`).
+- [`test/proxy.test.ts`](test/proxy.test.ts) — request/response helpers: upstream URL rebuilding, host rewriting, header stripping, POST body forwarding (with `duplex: 'half'`), and HTML content-type detection.
+
+## Performance
+
+A load/perf harness lives in [`perf/`](perf/). It measures client-observed
+proxy latency (p50/p90/p99, req/s) **and** Fastly server-side metrics — vCPU ms
+(`vCpuTime()` from `fastly:compute`), upstream fetch time, fragment-phase time,
+and backend-request count — which the function emits as `Server-Timing` /
+`x-compute-*` headers when a request carries the `x-perf-trace` header.
+
+```bash
+npm run dev                                   # start local server first
+npm run perf                                  # hit http://127.0.0.1:7676
+npm run perf -- --base https://your-site -n 500 -c 25   # or a deployed site
+```
+
+See [`perf/README.md`](perf/README.md) for options, scenarios, and how to read
+vCPU vs wall time (and why local Viceroy numbers aren't production-representative).
 
 ## Lint and typecheck
 
@@ -153,41 +178,40 @@ relaxation of `require-await` in tests (fetch mocks idiomatically declare
 
 | Trigger | Steps |
 |---|---|
-| Pull request to `main` | lint → typecheck → test |
-| Push to `main` | lint → typecheck → test → deploy |
+| Pull request to `main` | lint → typecheck → test → build (WASM) |
+| Push to `main` | lint → typecheck → test → build → deploy |
 | `workflow_dispatch` | full pipeline |
 
-The deploy job uses the GitHub environment named `build`, which must hold:
+The deploy job installs the `aio` CLI + edge-functions plugin and runs
+`aio aem edge-functions deploy ssreds`. It uses the GitHub environment named
+`build`, which must hold these secrets (Edge Delivery Site variant):
 
-- `CLOUDFLARE_API_TOKEN` — token with these permissions:
-  - **Account** Workers Scripts: Edit, Account Settings: Read
-  - **Zone** (your zone) Workers Routes: Edit
-  - **User** User Details: Read
-- `CLOUDFLARE_ACCOUNT_ID` — your Cloudflare account ID
+- `AEM_EDGE_FUNCTIONS_PROGRAM_ID` — Cloud Manager program ID
+- `AEM_EDGE_FUNCTIONS_SITE_DOMAIN` — the Edge Delivery site domain
+- `AEM_EDGE_FUNCTIONS_ADC_CLIENT_ID` / `_CLIENT_SECRET` / `_SCOPES` — OAuth
+  Server-to-Server credentials from the Adobe Developer Console
 
 For manual deploys:
 
 ```bash
-npm run deploy
+npm run deploy       # aio aem edge-functions deploy ssreds
 ```
 
 ## Verifying a deploy
 
 ```bash
-PAGE_HOST=main--your-site--your-org--page.diffatech.co.uk
-ORIGIN=https://main--your-site--your-org.aem.page
+SITE=https://your-edge-delivery-site.example
 
 # Origin should have at least one fragment block
-curl -s "$ORIGIN/" | grep -c 'class="fragment"'         # > 0
+curl -s "$SITE/" | grep -c 'class="fragment"'         # > 0
 
-# Through the proxy, fragment blocks are inlined
-curl -s "https://$PAGE_HOST/" | grep -c 'class="fragment"'  # > 0  (the <div class="fragment"> wrapper, with content now inside)
-curl -s "https://$PAGE_HOST/" | grep -c 'data-ssr="inlined"'  # > 0  (worker marker)
-curl -s "https://$PAGE_HOST/" | grep -c 'fragment-container'  # > 0  (section annotation)
+# Through the edge function, fragment blocks are inlined
+curl -s "$SITE/" | grep -c 'data-ssr="inlined"'       # > 0  (function marker)
+curl -s "$SITE/" | grep -c 'fragment-container'       # > 0  (section annotation)
 
-# Non-HTML pass-through
-curl -sI "https://$PAGE_HOST/styles/styles.css"          # 200, text/css
-curl -sI "https://$PAGE_HOST/scripts/scripts.js"         # 200, javascript
+# Non-HTML pass-through (not routed to the function)
+curl -sI "$SITE/styles/styles.css"                    # 200, text/css
+curl -sI "$SITE/scripts/scripts.js"                   # 200, javascript
 ```
 
 ## Project layout
@@ -195,16 +219,26 @@ curl -sI "https://$PAGE_HOST/scripts/scripts.js"         # 200, javascript
 ```
 ssreds/
 ├── src/
-│   ├── index.ts          # fetch handler: origin resolution, proxy, dispatch
+│   ├── index.ts          # addEventListener fetch handler: proxy + dispatch
+│   ├── proxy.ts          # platform-agnostic request/response helpers
+│   ├── fastly.ts         # fastly:* imports (backend, ConfigStore, CacheOverride)
 │   └── fragments.ts      # fragment detection, fetch, decoration, substitution
 ├── test/
 │   ├── fragments.test.ts
-│   └── index.test.ts
+│   └── proxy.test.ts
+├── perf/
+│   ├── loadtest.mjs      # load harness: latency percentiles + Fastly vCPU
+│   ├── scenarios.json    # default perf scenarios
+│   └── README.md
+├── config/
+│   ├── edgeFunctions.yaml  # AEM Edge Functions service declaration
+│   └── cdn.yaml            # Managed CDN origin-selector routing
 ├── .github/workflows/
-│   └── ci.yml            # lint + test + deploy on push to main
-├── wrangler.toml         # name, routes, HOST_MAP
+│   └── ci.yml            # lint + typecheck + test + build + deploy
+├── fastly.toml           # Fastly Compute manifest + local_server config
 ├── eslint.config.js
-├── tsconfig.json
+├── tsconfig.json         # typecheck config (noEmit)
+├── tsconfig.build.json   # build config (emits to build/)
 ├── vitest.config.ts
 └── package.json
 ```
