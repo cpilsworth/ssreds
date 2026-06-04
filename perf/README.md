@@ -19,6 +19,47 @@ Measures the ssreds edge function on two layers at once:
 
 The harness sends `x-perf-trace` and aggregates these across all requests.
 
+## How metrics are collected
+
+### Client-side latency
+`performance.now()` brackets each `fetch()` call in
+[`perf/loadtest.mjs:104–111`](loadtest.mjs#L104). Wall-clock time includes
+network round-trip, Fastly processing, and body download (the body is fully
+consumed via `res.arrayBuffer()` before the timer stops).
+
+### Fastly server-side metrics (vCPU, upstream, fragments, backend reqs)
+The harness opts in by sending `x-perf-trace: 1` with every measured request
+([`loadtest.mjs:102`](loadtest.mjs#L102); constant name:
+[`src/proxy.ts:66`](../src/proxy.ts#L66) `PERF_TRACE_HEADER`).
+
+Inside the edge function ([`src/index.ts:38`](../src/index.ts#L38)), the
+presence of that header enables instrumentation:
+
+- **vCPU** — [`src/fastly.ts:35`](../src/fastly.ts#L35) `vCpuTimeMs()` wraps
+  `vCpuTime()` from `fastly:compute`. This is Fastly's per-request thread
+  CPU "work time" in microseconds, converted to ms. It measures only cycles
+  actually spent on-CPU, not time blocked on I/O.
+- **upstream / fragments / total** — wall-clock durations accumulated in
+  `handleRequest` and passed to
+  [`src/proxy.ts:80`](../src/proxy.ts#L80) `formatServerTiming()`, which
+  serialises them as a `Server-Timing` header
+  ([`src/index.ts:101`](../src/index.ts#L101)).
+- **backend requests** — counted via the `onFetch` callback threaded through
+  `inlineFragments`, written as `x-compute-backend-reqs`
+  ([`src/index.ts:102`](../src/index.ts#L102)).
+
+The harness parses these headers per-response:
+`parseServerTiming()` ([`loadtest.mjs:87`](loadtest.mjs#L87)) extracts
+`Server-Timing` durations; `x-compute-vcpu-ms` is used as a fallback if the
+`vcpu` entry is absent ([`loadtest.mjs:118`](loadtest.mjs#L118)).
+All per-request samples are collected into arrays and reduced to
+mean/p50/p90/p99/max by `summarize()` ([`loadtest.mjs:72`](loadtest.mjs#L72)).
+
+> **Note:** `plain.html` and asset paths bypass the edge function entirely
+> (see `config/cdn.yaml` — only extensionless page paths are routed to the
+> function). Those responses carry no `Server-Timing`, so server-side metrics
+> are not available for those scenarios.
+
 ## Run
 
 Against local dev (start it first with `npm run dev`):

@@ -146,11 +146,29 @@ from coverage. Two suites:
 
 ## Performance
 
-A load/perf harness lives in [`perf/`](perf/). It measures client-observed
-proxy latency (p50/p90/p99, req/s) **and** Fastly server-side metrics — vCPU ms
-(`vCpuTime()` from `fastly:compute`), upstream fetch time, fragment-phase time,
-and backend-request count — which the function emits as `Server-Timing` /
-`x-compute-*` headers when a request carries the `x-perf-trace` header.
+A load/perf harness lives in [`perf/`](perf/). It measures two layers per
+request:
+
+**Client-side latency** — `performance.now()` brackets each `fetch()` in
+[`perf/loadtest.mjs:104`](perf/loadtest.mjs#L104), covering full round-trip
+including body download, reduced to p50/p90/p99/max by
+[`summarize()`](perf/loadtest.mjs#L72).
+
+**Fastly server-side metrics** — opt-in via `x-perf-trace: 1`
+([`src/proxy.ts:66`](src/proxy.ts#L66) `PERF_TRACE_HEADER`), detected in
+[`src/index.ts:38`](src/index.ts#L38), which then:
+- reads **vCPU work time** via [`vCpuTimeMs()`](src/fastly.ts#L35) (wraps
+  `vCpuTime()` from `fastly:compute` — CPU cycles only, not I/O wait)
+- serialises **upstream / fragments / total** wall times as a `Server-Timing`
+  header via [`formatServerTiming()`](src/proxy.ts#L80)
+  ([`src/index.ts:101`](src/index.ts#L101))
+- writes **backend-request count** as `x-compute-backend-reqs`
+  ([`src/index.ts:102`](src/index.ts#L102))
+
+The harness parses `Server-Timing` via
+[`parseServerTiming()`](perf/loadtest.mjs#L87) and falls back to
+`x-compute-vcpu-ms` for vCPU if needed
+([`loadtest.mjs:118`](perf/loadtest.mjs#L118)).
 
 ```bash
 npm run dev                                   # start local server first
