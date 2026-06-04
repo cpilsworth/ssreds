@@ -3,12 +3,14 @@ version: '1'
 data:
   originSelectors:
     rules:
-      # Route HTML document requests through the edge function so it can inline
-      # fragment content. Extensionless paths and the site root are documents;
-      # .plain.html and asset paths are left to the normal EDS origin so the
-      # function only runs where it adds value.
+      # Route EDS document requests through the edge function so it can inline
+      # fragment content. Matches only the site root and extensionless page
+      # paths (last segment has no dot) — e.g. `/`, `/products`, `/blog/post`.
+      # Anything with an extension (.html, .plain.html, .json, .js, .css,
+      # images, …) is left to the normal EDS origin so the function only runs
+      # where it adds value.
       - name: route-documents-to-ssreds
-        when: { reqProperty: path, matches: "^(/|.*[^.]+|.*\\.html)$" }
+        when: { reqProperty: path, matches: "^(/|/([^/]+/)*[^/.]+)$" }
         action:
           type: selectAemOrigin
           originName: edgefunction-ssreds
