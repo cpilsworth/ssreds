@@ -8,7 +8,7 @@ import {
   PERF_TRACE_HEADER,
   type TimingMetric,
 } from './proxy';
-import { BACKEND, buildCacheOverride, getOrigin, vCpuTimeMs } from './fastly';
+import { buildCacheOverride, getOrigin, vCpuTimeMs } from './fastly';
 
 // AEM Edge Function entry point. Runs as a Fastly Compute service at Adobe's
 // Managed CDN layer; `cdn.yaml` originSelectors route HTML document paths here.
@@ -44,11 +44,14 @@ async function handleRequest(event: FetchEvent): Promise<Response> {
     return new Response('No EDS origin configured', { status: 502 });
   }
 
-  // Single backend + cache override reused for the page fetch and every
-  // fragment sub-fetch. Mind Fastly's limit of 32 backend requests per
-  // execution — deep fragment recursion (MAX_DEPTH) plus fan-out shares it.
+  // No explicit `backend` option: the AEM Edge Functions runtime resolves the
+  // upstream from the request URL host (dynamic backends), and local Viceroy
+  // matches it against the `eds_origin` backend declared in fastly.toml. Naming
+  // a backend that isn't provisioned in production makes fetch() throw. The
+  // cache override is reused for the page fetch and every fragment sub-fetch.
+  // Mind Fastly's limit of 32 backend requests per execution — deep fragment
+  // recursion (MAX_DEPTH) plus fan-out shares it.
   const fetchInit: RequestInit = {
-    backend: BACKEND,
     cacheOverride: buildCacheOverride(300),
   };
 

@@ -8,14 +8,6 @@ import { CacheOverride } from 'fastly:cache-override';
 import { vCpuTime } from 'fastly:compute';
 
 /**
- * Named backend for the upstream EDS origin. Declared in `fastly.toml`
- * (`[local_server.backends.eds_origin]`) for local dev and provisioned by the
- * AEM Edge Functions service in production. Every upstream/fragment fetch
- * routes through this single backend.
- */
-export const BACKEND = 'eds_origin';
-
-/**
  * Resolve the EDS origin from the `config_default` ConfigStore. `EDS_ORIGIN`
  * holds the bare EDS hostname, e.g. `main--repo--owner.aem.live`. Throws if it
  * is missing so the caller can return a 502.
